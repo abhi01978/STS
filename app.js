@@ -1444,8 +1444,8 @@ const fs = require('fs');
 const cors = require('cors');
 const { Server } = require('socket.io');
 const http = require('http');
-app.use(express.json()); // Parse JSON payloads
-app.use(express.urlencoded({ extended: true })); 
+const dataPath = path.join(__dirname, 'data.json');
+
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
