@@ -2118,26 +2118,7 @@
       formData.append('username', username);
       formData.append('password', password);
       if (file) formData.append('profileImage', file);
-fetch('/register', { method: 'POST', body: formData })
-  .then(response => {
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    return response.json();
-  })
-  .then(data => console.log(data))
-  .catch(error => alert('Error: ' + error.message));
-fetch('/endpoint')
-  .then(response => response.text())
-  .then(data => {
-    try {
-      const json = JSON.parse(data);
-      console.log(json);
-    } catch (err) {
-      console.error('Response is not valid JSON:', data);
-      alert('Unexpected server response.');
-    }
-  });
+
 
       fetch('/register', { method: 'POST', body: formData })
         .then(response => response.json())
