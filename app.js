@@ -8,7 +8,6 @@
 // const cors = require('cors');
 // const { Server } = require('socket.io');
 // const http = require('http');
-
 // const app = express();
 // const server = http.createServer(app);
 // const io = new Server(server);
@@ -32,7 +31,6 @@
 
 // const readDB = () => JSON.parse(fs.readFileSync(dbFile));
 // const writeDB = (data) => fs.writeFileSync(dbFile, JSON.stringify(data));
-
 // // User registration
 // app.post('/register', upload.single('profileImage'), async (req, res) => {
 //   const { username, password } = req.body;
@@ -1446,7 +1444,8 @@ const fs = require('fs');
 const cors = require('cors');
 const { Server } = require('socket.io');
 const http = require('http');
-
+app.use(express.json()); // Parse JSON payloads
+app.use(express.urlencoded({ extended: true })); 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
@@ -1484,6 +1483,16 @@ const writeDB = (data) => {
     console.error('Error writing to database:', error);
   }
 };
+fetch('/register', { method: 'POST', body: formData })
+  .then(response => {
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    return response.json();
+  })
+  .then(data => console.log(data))
+  .catch(error => alert('Error: ' + error.message));
+
 
 // User registration
 app.post('/register', upload.single('profileImage'), async (req, res) => {
