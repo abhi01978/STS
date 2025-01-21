@@ -1,0 +1,2329 @@
+<!-- <!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Real-time Status App</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <style>
+    .carousel {
+      display: flex;
+      overflow-x: auto;
+      scroll-snap-type: x mandatory;
+      gap: 1rem;
+      padding: 1rem 0;
+    }
+    .carousel-item {
+      scroll-snap-align: center;
+      flex-shrink: 0;
+      width: 300px;
+      background: #f3f4f6;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      padding: 1rem;
+      text-align: center;
+      height: 200px;
+    }
+
+    .carousel-item video, .carousel-item img {
+      height: 200px;
+      width: 100%;
+      object-fit: cover;
+      border-radius: 8px;
+    }
+
+    .viewer-list {
+      margin-top: 1rem;
+      text-align: left;
+    }
+    .viewer-item {
+      display: flex;
+      align-items: center;
+      margin-bottom: 0.5rem;
+    }
+    .viewer-item img {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      margin-right: 0.5rem;
+    }
+  </style>
+</head>
+<body class="bg-gray-100 font-sans">
+  <div class="container mx-auto p-4">
+    <div id="auth" class="max-w-md mx-auto bg-white shadow-lg rounded-lg p-6">
+      <div id="register" class="mb-6">
+        <h2 class="text-2xl font-bold text-gray-700 mb-4">Register</h2>
+        <input id="reg-username" placeholder="Username" class="w-full p-2 mb-3 border rounded-md" />
+        <input id="reg-password" type="password" placeholder="Password" class="w-full p-2 mb-3 border rounded-md" />
+        <input id="reg-profile-image" type="file" class="w-full p-2 mb-3 border rounded-md" />
+        <button onclick="register()" class="bg-blue-500 text-white py-2 px-4 rounded-md w-full hover:bg-blue-600">
+          Register
+        </button>
+      </div>
+
+      <div id="login">
+        <h2 class="text-2xl font-bold text-gray-700 mb-4">Login</h2>
+        <input id="username" placeholder="Username" class="w-full p-2 mb-3 border rounded-md" />
+        <input id="password" type="password" placeholder="Password" class="w-full p-2 mb-3 border rounded-md" />
+        <button onclick="login()" class="bg-green-500 text-white py-2 px-4 rounded-md w-full hover:bg-green-600">
+          Login
+        </button>
+      </div>
+    </div>
+
+    <div id="dashboard" class="hidden">
+      <div class="bg-white shadow-lg rounded-lg p-6 mb-6">
+        <h2 class="text-2xl font-bold text-gray-700">Welcome, <span id="user-name"></span></h2>
+        <img id="profile-image" class="w-16 h-16 rounded-full mt-4" alt="Profile Image" />
+      </div>
+
+      <div class="bg-white shadow-lg rounded-lg p-6 mb-6">
+        <h3 class="text-xl font-bold text-gray-700 mb-4">Post a Status</h3>
+        <input id="status-text" placeholder="What's on your mind?" class="w-full p-2 mb-3 border rounded-md" />
+        <input id="status-image" type="file" class="w-full p-2 mb-3 border rounded-md" />
+        <input id="status-video" type="file" accept="video/mp4, video/m4v, audio/mp3" class="w-full p-2 mb-3 border rounded-md" />
+        <button onclick="postStatus()" class="bg-blue-500 text-white py-2 px-4 rounded-md w-full hover:bg-blue-600">
+          Post Status
+        </button>
+      </div>
+
+      <div class="bg-white shadow-lg rounded-lg p-6 mb-6">
+        <h3 class="text-xl font-bold text-gray-700 mb-4">All Users</h3>
+        <div id="users" class="grid grid-cols-2 gap-4"></div>
+      </div>
+
+      <div class="bg-white shadow-lg rounded-lg p-6">
+        <h3 class="text-xl font-bold text-gray-700 mb-4">All Statuses</h3>
+        <div id="statuses" class="carousel"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const socket = io();
+    let currentUser;
+
+    function register() {
+      const username = document.getElementById('reg-username').value;
+      const password = document.getElementById('reg-password').value;
+      const file = document.getElementById('reg-profile-image').files[0];
+      const formData = new FormData();
+      formData.append('username', username);
+      formData.append('password', password);
+      if (file) formData.append('profileImage', file);
+
+      fetch('/register', { method: 'POST', body: formData })
+        .then((res) => {
+          if (res.status === 201) {
+            alert('Registration successful! You can now log in.');
+          } else {
+            alert('Registration failed. Username may already exist.');
+          }
+        });
+    }
+
+    function login() {
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+
+      fetch('/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      })
+      .then((res) => res.json())
+      .then((user) => {
+        currentUser = user;
+        document.getElementById('auth').style.display = 'none';
+        document.getElementById('dashboard').classList.remove('hidden');
+        document.getElementById('user-name').innerText = user.username;
+        document.getElementById('profile-image').src = user.profileImage || '';
+        loadUsers();
+        loadStatuses();
+      });
+    }
+
+    // function loadUsers() {
+    //   fetch('/users')
+    //     .then((res) => res.json())
+    //     .then((users) => {
+    //       document.getElementById('users').innerHTML = users.map(
+    //         (user) => `
+    //           <div class="text-center p-4 bg-gray-200 rounded-md shadow-sm">
+    //             <p>${user.username}</p>
+    //           </div>
+    //         `).join('');
+    //     });
+    function loadUsers() {
+      fetch('/users')
+        .then((res) => res.json())
+        .then((users) => {
+          document.getElementById('users').innerHTML = users
+            .filter((user) => user.id !== currentUser.id)
+            .map(
+              (user) => `
+                <div class="flex items-center p-4 bg-gray-200 rounded-md shadow-sm">
+                  <img src="${user.profileImage}" alt="${user.username}" class="w-10 h-10 rounded-full mr-3" />
+                  <div>
+                    <p>${user.username}</p>
+                    <p class="text-sm ${user.isOnline ? 'text-green-500' : 'text-gray-500'}">
+                      ${user.isOnline ? 'Online' : 'Offline'}
+                    </p>
+                  </div>
+                </div>
+              `
+            ).join('');
+        });
+    }
+
+    function loadStatuses() {
+      fetch('/statuses')
+        .then((res) => res.json())
+        .then((statuses) => {
+          document.getElementById('statuses').innerHTML = statuses.map(
+            (status) => `
+              <div class="carousel-item p-4 bg-gray-200 rounded-md shadow-sm">
+                <p>${status.text}</p>
+                ${status.statusImage ? `<img src="${status.statusImage}" class="mt-2 rounded-md" />` : ''}
+                ${status.statusVideo ? `<video controls autoplay class="mt-2 rounded-md" controlsList="nodownload">
+                  <source src="${status.statusVideo}" type="video/mp4" />
+                </video>` : ''}
+                ${status.statusVideo ? `<audio controls autoplay class="mt-2 rounded-md" controlsList="nodownload">
+                  <source src="${status.statusVideo}" type="audio/mp3" />
+                </audio>` : ''}
+                <div class="viewer-list">
+                  <p class="font-bold">Viewed By:</p>
+                  ${status.viewers ? status.viewers.map(
+                    (viewer) => `
+                      <div class="viewer-item">
+                        <img src="${viewer.profileImage}" alt="${viewer.username}" />
+                        <p>${viewer.username}</p>
+                      </div>
+                    `
+                  ).join('') : '<p>No one has viewed this status yet.</p>'}
+                </div>
+              </div>
+            `).join('');
+        });
+    }
+
+    function postStatus() {
+      const text = document.getElementById('status-text').value;
+      const imageFile = document.getElementById('status-image').files[0];
+      const videoFile = document.getElementById('status-video').files[0];
+      const formData = new FormData();
+      formData.append('text', text);
+      formData.append('userId', currentUser.id);
+      if (imageFile) formData.append('statusImage', imageFile);
+      if (videoFile) formData.append('statusVideo', videoFile);
+
+      fetch('/status', { method: 'POST', body: formData })
+        .then(() => loadStatuses());
+    }
+
+    socket.on('new-status', loadStatuses);
+    socket.on('update-users', (updatedUsers) => {
+      users = updatedUsers;
+      loadUsers();
+    });
+  </script>
+</body>
+</html>  -->
+
+
+<!-- 
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Real-time Status App</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <style>
+    .carousel {
+      display: flex;
+      overflow-x: auto;
+      scroll-snap-type: x mandatory;
+      gap: 1rem;
+      padding: 1rem 0;
+    }
+    .carousel-item {
+      scroll-snap-align: center;
+      flex-shrink: 0;
+      width: 300px;
+      background: #f3f4f6;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      padding: 1rem;
+      text-align: center;
+      height: 200px;
+    }
+    .chat-box {
+      display: none;
+      flex-direction: column;
+      height: 400px;
+      width: 300px;
+      background: white;
+      position: fixed;
+      bottom: 10px;
+      right: 10px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      padding: 10px;
+      border-radius: 8px;
+    }
+    .chat-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px;
+      border-bottom: 1px solid #e4e6e7;
+    }
+    .chat-header img {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+    }
+    .chat-header h4 {
+      margin: 0 10px;
+      font-size: 16px;
+      font-weight: bold;
+    }
+    .message {
+      padding: 5px 10px;
+      margin-bottom: 5px;
+      border-radius: 12px;
+      width: fit-content;
+    }
+    .message-sender {
+      background-color: #0078D4;
+      color: white;
+      align-self: flex-end;
+    }
+    .message-receiver {
+      background-color: #E4E6E7;
+      color: black;
+      align-self: flex-start;
+    }
+  </style>
+</head>
+<body class="bg-gray-100 font-sans">
+  <div class="container mx-auto p-4">
+    <div id="auth" class="max-w-md mx-auto bg-white shadow-lg rounded-lg p-6">
+      <div id="register" class="mb-6">
+        <h2 class="text-2xl font-bold text-gray-700 mb-4">Register</h2>
+        <input id="reg-username" placeholder="Username" class="w-full p-2 mb-3 border rounded-md" />
+        <input id="reg-password" type="password" placeholder="Password" class="w-full p-2 mb-3 border rounded-md" />
+        <input id="reg-profile-image" type="file" class="w-full p-2 mb-3 border rounded-md" />
+        <button onclick="register()" class="bg-blue-500 text-white py-2 px-4 rounded-md w-full hover:bg-blue-600">
+          Register
+        </button>
+      </div>
+
+      <div id="login">
+        <h2 class="text-2xl font-bold text-gray-700 mb-4">Login</h2>
+        <input id="username" placeholder="Username" class="w-full p-2 mb-3 border rounded-md" />
+        <input id="password" type="password" placeholder="Password" class="w-full p-2 mb-3 border rounded-md" />
+        <button onclick="login()" class="bg-green-500 text-white py-2 px-4 rounded-md w-full hover:bg-green-600">
+          Login
+        </button>
+      </div>
+    </div>
+
+    <div id="dashboard" class="hidden">
+      <div class="bg-white shadow-lg rounded-lg p-6 mb-6">
+        <h2 class="text-2xl font-bold text-gray-700">Welcome, <span id="user-name"></span></h2>
+        <img id="profile-image" class="w-16 h-16 rounded-full mt-4" alt="Profile Image" />
+      </div>
+
+      <div class="bg-white shadow-lg rounded-lg p-6 mb-6">
+        <h3 class="text-xl font-bold text-gray-700 mb-4">Post a Status</h3>
+        <input id="status-text" placeholder="What's on your mind?" class="w-full p-2 mb-3 border rounded-md" />
+        <input id="status-image" type="file" class="w-full p-2 mb-3 border rounded-md" />
+        <input id="status-video" type="file" accept="video/mp4, video/m4v, audio/mp3" class="w-full p-2 mb-3 border rounded-md" />
+        <button onclick="postStatus()" class="bg-blue-500 text-white py-2 px-4 rounded-md w-full hover:bg-blue-600">
+          Post Status
+        </button>
+      </div>
+
+      <div class="bg-white shadow-lg rounded-lg p-6 mb-6">
+        <h3 class="text-xl font-bold text-gray-700 mb-4">All Users</h3>
+        <div id="users" class="grid grid-cols-2 gap-4"></div>
+      </div>
+
+      <div class="bg-white shadow-lg rounded-lg p-6">
+        <h3 class="text-xl font-bold text-gray-700 mb-4">All Statuses</h3>
+        <div id="statuses" class="carousel"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="chat-box" class="chat-box">
+    <div class="chat-header">
+      <div class="flex items-center">
+        <img id="chat-profile-image" alt="User Image" />
+        <h4 id="chat-username">User</h4>
+      </div>
+      <button onclick="closeChatBox()" class="text-gray-600 hover:text-gray-900">&times;</button>
+    </div>
+    <div id="chat-messages" class="flex-1 overflow-y-auto mb-3"></div>
+    <input id="chat-input" class="w-full p-2 border rounded-md" placeholder="Type a message..." />
+    <button onclick="sendMessage()" class="bg-blue-500 text-white py-2 px-4 rounded-md mt-2 w-full">Send</button>
+  </div>
+
+  <script>
+    const socket = io();
+    let currentUser;
+    let currentReceiver;
+
+    function register() {
+      const username = document.getElementById('reg-username').value;
+      const password = document.getElementById('reg-password').value;
+      const file = document.getElementById('reg-profile-image').files[0];
+      const formData = new FormData();
+      formData.append('username', username);
+      formData.append('password', password);
+      if (file) formData.append('profileImage', file);
+
+      fetch('/register', { method: 'POST', body: formData })
+        .then(response => response.json())
+        .then(user => {
+          currentUser = user;
+          document.getElementById('user-name').innerText = user.username;
+          document.getElementById('profile-image').src = user.profileImage || 'default-profile.jpg';
+          document.getElementById('register').style.display = 'none';
+          document.getElementById('login').style.display = 'none';
+          document.getElementById('dashboard').style.display = 'block';
+          socket.emit('register-user', user.id);
+          loadUsers();
+          loadStatuses();
+        })
+        .catch(error => alert('Error: ' + error.message));
+    }
+
+    function login() {
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+      fetch('/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      })
+        .then(response => response.json())
+        .then(user => {
+          currentUser = user;
+          document.getElementById('user-name').innerText = user.username;
+          document.getElementById('profile-image').src = user.profileImage || 'default-profile.jpg';
+          document.getElementById('register').style.display = 'none';
+          document.getElementById('login').style.display = 'none';
+          document.getElementById('dashboard').style.display = 'block';
+          socket.emit('register-user', user.id);
+          loadUsers();
+          loadStatuses();
+        })
+        .catch(error => alert('Error: ' + error.message));
+    }
+
+    function loadUsers() {
+      fetch('/users')
+        .then(response => response.json())
+        .then(users => {
+          const usersDiv = document.getElementById('users');
+          usersDiv.innerHTML = '';
+          users
+            .filter(user => user.id !== currentUser.id) // Exclude current user
+            .forEach(user => {
+              const userDiv = document.createElement('div');
+              userDiv.classList.add('p-4', 'border', 'rounded-md', 'cursor-pointer');
+              userDiv.innerHTML = `
+                <img src="${user.profileImage || 'default-profile.jpg'}" class="w-12 h-12 rounded-full" />
+                <p class="mt-2 text-center">${user.username}</p>
+              `;
+              userDiv.onclick = () => openChat(user);
+              usersDiv.appendChild(userDiv);
+            });
+        });
+    }
+
+    function openChat(user) {
+      currentReceiver = user;
+      document.getElementById('chat-box').style.display = 'flex';
+      document.getElementById('chat-profile-image').src = user.profileImage || 'default-profile.jpg';
+      document.getElementById('chat-username').innerText = user.username;
+      loadMessages();
+    }
+
+    function closeChatBox() {
+      document.getElementById('chat-box').style.display = 'none';
+    }
+
+    function loadMessages() {
+      fetch(`/messages/${currentUser.id}/${currentReceiver.id}`)
+        .then(response => response.json())
+        .then(messages => {
+          const messagesDiv = document.getElementById('chat-messages');
+          messagesDiv.innerHTML = '';
+          messages.forEach(message => {
+            const messageDiv = document.createElement('div');
+            messageDiv.classList.add('message');
+            messageDiv.classList.add(message.senderId === currentUser.id ? 'message-sender' : 'message-receiver');
+            messageDiv.innerText = message.text;
+            messagesDiv.appendChild(messageDiv);
+          });
+          messagesDiv.scrollTop = messagesDiv.scrollHeight; // Scroll to the latest message
+        });
+    }
+
+    function sendMessage() {
+      const text = document.getElementById('chat-input').value;
+      if (!text || !currentReceiver) return;
+
+      const message = {
+        senderId: currentUser.id,
+        receiverId: currentReceiver.id,
+        text,
+        timestamp: new Date().toISOString(),
+      };
+
+      socket.emit('send-message', message);
+      document.getElementById('chat-input').value = '';
+      loadMessages();
+    }
+
+    socket.on('receive-message', (message) => {
+      if (message.senderId === currentReceiver.id && message.receiverId === currentUser.id) {
+        loadMessages();
+      }
+    });
+    function loadStatuses() {
+      fetch('/statuses')
+        .then(response => response.json())
+        .then(statuses => {
+          const statusesDiv = document.getElementById('statuses');
+          statusesDiv.innerHTML = '';
+          statuses.forEach(status => {
+            const statusDiv = document.createElement('div');
+            statusDiv.classList.add('carousel-item');
+            statusDiv.innerHTML = `
+              <img src="${status.statusImage || status.statusVideo || 'default-status.jpg'}" class="w-full h-40 object-cover rounded-lg" />
+              <p class="mt-2">${status.text}</p>
+            `;
+            statusesDiv.appendChild(statusDiv);
+          });
+        });
+    }
+
+    function postStatus() {
+      const text = document.getElementById('status-text').value;
+      const statusImage = document.getElementById('status-image').files[0];
+      const statusVideo = document.getElementById('status-video').files[0];
+
+      const formData = new FormData();
+      formData.append('userId', currentUser.id);
+      formData.append('text', text);
+      if (statusImage) formData.append('statusImage', statusImage);
+      if (statusVideo) formData.append('statusVideo', statusVideo);
+
+      fetch('/status', { method: 'POST', body: formData })
+        .then(response => response.json())
+        .then(() => loadStatuses())
+        .catch(error => alert('Error: ' + error.message));
+    }
+
+    socket.on('receive-message', (message) => {
+      if (currentReceiver && message.senderId === currentReceiver.id) {
+        loadMessages(); // Refresh message list
+      }
+    });
+
+    socket.on('update-users', loadUsers);
+  </script>
+</body>
+</html>  -->
+<!-- 
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Real-time Status App</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <style>
+    .carousel {
+      display: flex;
+      overflow-x: auto;
+      scroll-snap-type: x mandatory;
+      gap: 1rem;
+      padding: 1rem 0;
+    }
+    .carousel-item {
+      scroll-snap-align: center;
+      flex-shrink: 0;
+      width: 300px;
+      background: #f3f4f6;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      padding: 1rem;
+      text-align: center;
+      height: 200px;
+    }
+    .chat-box {
+      display: none;
+      flex-direction: column;
+      height: 100%;
+      width: 100%;
+      background: white;
+      position: fixed;
+      bottom: 0;
+      right: 0;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      padding: 10px;
+      border-radius: 8px;
+    }
+    .chat-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px;
+      border-bottom: 1px solid #e4e6e7;
+    }
+    .chat-header img {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+    }
+    .chat-header h4 {
+      margin: 0 10px;
+      font-size: 16px;
+      font-weight: bold;
+    }
+    .message {
+      padding: 5px 10px;
+      margin-bottom: 5px;
+      border-radius: 12px;
+      width: fit-content;
+    }
+    .message-sender {
+      background-color: #0078D4;
+      color: white;
+      align-self: flex-end;
+    }
+    .message-receiver {
+      background-color: #E4E6E7;
+      color: black;
+      align-self: flex-start;
+    }
+    .delete-button {
+      font-size: 12px;
+      color: red;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body class="bg-gray-100 font-sans">
+  <div class="container mx-auto p-4">
+    <div id="auth" class="max-w-md mx-auto bg-white shadow-lg rounded-lg p-6">
+      <div id="register" class="mb-6">
+        <h2 class="text-2xl font-bold text-gray-700 mb-4">Register</h2>
+        <input id="reg-username" placeholder="Username" class="w-full p-2 mb-3 border rounded-md" />
+        <input id="reg-password" type="password" placeholder="Password" class="w-full p-2 mb-3 border rounded-md" />
+        <input id="reg-profile-image" type="file" class="w-full p-2 mb-3 border rounded-md" />
+        <button onclick="register()" class="bg-blue-500 text-white py-2 px-4 rounded-md w-full hover:bg-blue-600">
+          Register
+        </button>
+      </div>
+
+      <div id="login">
+        <h2 class="text-2xl font-bold text-gray-700 mb-4">Login</h2>
+        <input id="username" placeholder="Username" class="w-full p-2 mb-3 border rounded-md" />
+        <input id="password" type="password" placeholder="Password" class="w-full p-2 mb-3 border rounded-md" />
+        <button onclick="login()" class="bg-green-500 text-white py-2 px-4 rounded-md w-full hover:bg-green-600">
+          Login
+        </button>
+      </div>
+    </div>
+
+    <div id="dashboard" class="hidden">
+      <div class="bg-white shadow-lg rounded-lg p-6 mb-6">
+        <h2 class="text-2xl font-bold text-gray-700">Welcome, <span id="user-name"></span></h2>
+        <img id="profile-image" class="w-16 h-16 rounded-full mt-4" alt="Profile Image" />
+      </div>
+
+      <div class="bg-white shadow-lg rounded-lg p-6 mb-6">
+        <h3 class="text-xl font-bold text-gray-700 mb-4">Post a Status</h3>
+        <input id="status-text" placeholder="What's on your mind?" class="w-full p-2 mb-3 border rounded-md" />
+        <input id="status-image" type="file" class="w-full p-2 mb-3 border rounded-md" />
+        <input id="status-video" type="file" accept="video/mp4, video/m4v, audio/mp3" class="w-full p-2 mb-3 border rounded-md" />
+        <button onclick="postStatus()" class="bg-blue-500 text-white py-2 px-4 rounded-md w-full hover:bg-blue-600" id="post-status-btn">
+          Post Status
+        </button>
+        <p id="status-success" class="text-green-500 mt-2 hidden">Status posted successfully!</p>
+      </div>
+
+      <div class="bg-white shadow-lg rounded-lg p-6 mb-6">
+        <h3 class="text-xl font-bold text-gray-700 mb-4">All Users</h3>
+        <div id="users" class="grid grid-cols-2 gap-4"></div>
+      </div>
+
+      <div class="bg-white shadow-lg rounded-lg p-6">
+        <h3 class="text-xl font-bold text-gray-700 mb-4">All Statuses</h3>
+        <div id="statuses" class="carousel"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="chat-box" class="chat-box">
+    <div class="chat-header">
+      <div class="flex items-center">
+        <img id="chat-profile-image" alt="User Image" />
+        <h4 id="chat-username">User</h4>
+      </div>
+      <button onclick="closeChatBox()" class="text-gray-600 hover:text-gray-900">&times;</button>
+    </div>
+    <div id="chat-messages" class="flex-1 overflow-y-auto mb-3"></div>
+    <input id="chat-input" class="w-full p-2 border rounded-md" placeholder="Type a message..." />
+    <button onclick="sendMessage()" class="bg-blue-500 text-white py-2 px-4 rounded-md mt-2 w-full">Send</button>
+  </div>
+
+  <script>
+    const socket = io();
+    let currentUser;
+    let currentReceiver;
+
+    function register() {
+      const username = document.getElementById('reg-username').value;
+      const password = document.getElementById('reg-password').value;
+      const file = document.getElementById('reg-profile-image').files[0];
+      const formData = new FormData();
+      formData.append('username', username);
+      formData.append('password', password);
+      if (file) formData.append('profileImage', file);
+
+      fetch('/register', { method: 'POST', body: formData })
+        .then(response => response.json())
+        .then(user => {
+          currentUser = user;
+          document.getElementById('user-name').innerText = user.username;
+          document.getElementById('profile-image').src = user.profileImage || 'default-profile.jpg';
+          document.getElementById('register').style.display = 'none';
+          document.getElementById('login').style.display = 'none';
+          document.getElementById('dashboard').style.display = 'block';
+          socket.emit('register-user', user.id);
+          loadUsers();
+          loadStatuses();
+        })
+        .catch(error => alert('Error: ' + error.message));
+    }
+
+    function login() {
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+      fetch('/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      })
+        .then(response => response.json())
+        .then(user => {
+          currentUser = user;
+          document.getElementById('user-name').innerText = user.username;
+          document.getElementById('profile-image').src = user.profileImage || 'default-profile.jpg';
+          document.getElementById('register').style.display = 'none';
+          document.getElementById('login').style.display = 'none';
+          document.getElementById('dashboard').style.display = 'block';
+          socket.emit('register-user', user.id);
+          loadUsers();
+          loadStatuses();
+        })
+        .catch(error => alert('Error: ' + error.message));
+    }
+
+    function loadUsers() {
+      fetch('/users')
+        .then(response => response.json())
+        .then(users => {
+          const usersContainer = document.getElementById('users');
+          usersContainer.innerHTML = '';
+          users.forEach(user => {
+            const userDiv = document.createElement('div');
+            userDiv.classList.add('flex', 'items-center', 'gap-3');
+            userDiv.innerHTML = `
+              <img src="${user.profileImage || 'default-profile.jpg'}" class="w-12 h-12 rounded-full" />
+              <span class="font-medium">${user.username}</span>
+              <button onclick="openChatBox(${user.id})" class="bg-blue-500 text-white py-2 px-4 rounded-md text-xs">Chat</button>
+            `;
+            usersContainer.appendChild(userDiv);
+          });
+        });
+    }
+
+    function loadStatuses() {
+      fetch('/statuses')
+        .then(response => response.json())
+        .then(statuses => {
+          const statusesContainer = document.getElementById('statuses');
+          statusesContainer.innerHTML = '';
+          statuses.forEach(status => {
+            const statusDiv = document.createElement('div');
+            statusDiv.classList.add('carousel-item');
+            statusDiv.innerHTML = `
+              <h4 class="font-medium">${status.username}</h4>
+              <img src="${status.image || status.video || 'default-status.jpg'}" alt="Status" class="w-full h-full object-cover rounded-md" />
+            `;
+            statusesContainer.appendChild(statusDiv);
+          });
+        });
+    }
+
+    function postStatus() {
+      const statusText = document.getElementById('status-text').value;
+      const file = document.getElementById('status-image').files[0];
+      const video = document.getElementById('status-video').files[0];
+      const formData = new FormData();
+      formData.append('statusText', statusText);
+      if (file) formData.append('statusImage', file);
+      if (video) formData.append('statusVideo', video);
+
+      fetch('/statuses', {
+        method: 'POST',
+        body: formData,
+      })
+        .then(response => response.json())
+        .then(status => {
+          document.getElementById('status-success').style.display = 'block';
+          document.getElementById('status-text').value = '';
+          document.getElementById('status-image').value = '';
+          document.getElementById('status-video').value = '';
+          loadStatuses();
+        })
+        .catch(error => alert('Error posting status: ' + error.message));
+    }
+
+    function openChatBox(receiverId) {
+      currentReceiver = receiverId;
+      fetch(`/user/${receiverId}`)
+        .then(response => response.json())
+        .then(user => {
+          document.getElementById('chat-username').innerText = user.username;
+          document.getElementById('chat-profile-image').src = user.profileImage || 'default-profile.jpg';
+          document.getElementById('chat-box').style.display = 'flex';
+        });
+    }
+
+    function closeChatBox() {
+      document.getElementById('chat-box').style.display = 'none';
+    }
+
+    function sendMessage() {
+      const messageText = document.getElementById('chat-input').value;
+      if (messageText) {
+        socket.emit('send-message', { senderId: currentUser.id, receiverId: currentReceiver, message: messageText });
+        document.getElementById('chat-input').value = '';
+      }
+    }
+
+    socket.on('receive-message', (message) => {
+      const chatMessages = document.getElementById('chat-messages');
+      const messageDiv = document.createElement('div');
+      messageDiv.classList.add('message', message.senderId === currentUser.id ? 'message-sender' : 'message-receiver');
+      messageDiv.innerHTML = `
+        <p>${message.message}</p>
+        <button class="delete-button" onclick="deleteMessage('${message.id}')">Delete</button>
+      `;
+      chatMessages.appendChild(messageDiv);
+    });
+
+    function deleteMessage(messageId) {
+      socket.emit('delete-message', messageId);
+    }
+  </script>
+</body>
+</html> 
+
+
+-->
+<!-- 
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Real-time Status App</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <style>
+    .carousel {
+      display: flex;
+      overflow-x: auto;
+      scroll-snap-type: x mandatory;
+      gap: 1rem;
+      padding: 1rem 0;
+    }
+    .carousel-item {
+      scroll-snap-align: center;
+      flex-shrink: 0;
+      width: 300px;
+      background: #f3f4f6;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      padding: 1rem;
+      text-align: center;
+      height: 200px;
+    }
+    .chat-box {
+      display: none;
+      flex-direction: column;
+      height: 100%;
+      width: 100%;
+      background: white;
+      position: fixed;
+      bottom: 0;
+      right: 0;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      padding: 10px;
+      border-radius: 8px;
+    }
+    .chat-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px;
+      border-bottom: 1px solid #e4e6e7;
+    }
+    .chat-header img {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+    }
+    .chat-header h4 {
+      margin: 0 10px;
+      font-size: 16px;
+      font-weight: bold;
+    }
+    .message {
+      padding: 5px 10px;
+      margin-bottom: 5px;
+      border-radius: 12px;
+      width: fit-content;
+    }
+    .message-sender {
+      background-color: #0078D4;
+      color: white;
+      align-self: flex-end;
+    }
+    .message-receiver {
+      background-color: #E4E6E7;
+      color: black;
+      align-self: flex-start;
+    }
+    .delete-button {
+      font-size: 12px;
+      color: red;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body class="bg-gray-100 font-sans">
+  <div class="container mx-auto p-4">
+    <div id="auth" class="max-w-md mx-auto bg-white shadow-lg rounded-lg p-6">
+      <div id="register" class="mb-6">
+        <h2 class="text-2xl font-bold text-gray-700 mb-4">Register</h2>
+        <input id="reg-username" placeholder="Username" class="w-full p-2 mb-3 border rounded-md" />
+        <input id="reg-password" type="password" placeholder="Password" class="w-full p-2 mb-3 border rounded-md" />
+        <input id="reg-profile-image" type="file" class="w-full p-2 mb-3 border rounded-md" />
+        <button onclick="register()" class="bg-blue-500 text-white py-2 px-4 rounded-md w-full hover:bg-blue-600">
+          Register
+        </button>
+      </div>
+
+      <div id="login">
+        <h2 class="text-2xl font-bold text-gray-700 mb-4">Login</h2>
+        <input id="username" placeholder="Username" class="w-full p-2 mb-3 border rounded-md" />
+        <input id="password" type="password" placeholder="Password" class="w-full p-2 mb-3 border rounded-md" />
+        <button onclick="login()" class="bg-green-500 text-white py-2 px-4 rounded-md w-full hover:bg-green-600">
+          Login
+        </button>
+      </div>
+    </div>
+
+    <div id="dashboard" class="hidden">
+      <div class="bg-white shadow-lg rounded-lg p-6 mb-6">
+        <h2 class="text-2xl font-bold text-gray-700">Welcome, <span id="user-name"></span></h2>
+        <img id="profile-image" class="w-16 h-16 rounded-full mt-4" alt="Profile Image" />
+      </div>
+
+      <div class="bg-white shadow-lg rounded-lg p-6 mb-6">
+        <h3 class="text-xl font-bold text-gray-700 mb-4">Post a Status</h3>
+        <input id="status-text" placeholder="What's on your mind?" class="w-full p-2 mb-3 border rounded-md" />
+        <input id="status-image" type="file" class="w-full p-2 mb-3 border rounded-md" />
+        <input id="status-video" type="file" accept="video/mp4, video/m4v, audio/mp3" class="w-full p-2 mb-3 border rounded-md" />
+        <button onclick="postStatus()" class="bg-blue-500 text-white py-2 px-4 rounded-md w-full hover:bg-blue-600" id="post-status-btn">
+          Post Status
+        </button>
+        <p id="status-success" class="text-green-500 mt-2 hidden">Status posted successfully!</p>
+      </div>
+
+      <div class="bg-white shadow-lg rounded-lg p-6 mb-6">
+        <h3 class="text-xl font-bold text-gray-700 mb-4">All Users</h3>
+        <div id="users" class="grid grid-cols-2 gap-4"></div>
+      </div>
+
+      <div class="bg-white shadow-lg rounded-lg p-6">
+        <h3 class="text-xl font-bold text-gray-700 mb-4">All Statuses</h3>
+        <div id="statuses" class="carousel"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="chat-box" class="chat-box">
+    <div class="chat-header">
+      <div class="flex items-center">
+        <img id="chat-profile-image" alt="User Image" />
+        <h4 id="chat-username">User</h4>
+      </div>
+      <button onclick="closeChatBox()" class="text-gray-600 hover:text-gray-900">&times;</button>
+    </div>
+    <div id="chat-messages" class="flex-1 overflow-y-auto mb-3"></div>
+    <input id="chat-input" class="w-full p-2 border rounded-md" placeholder="Type a message..." />
+    <button onclick="sendMessage()" class="bg-blue-500 text-white py-2 px-4 rounded-md mt-2 w-full">Send</button>
+  </div>
+
+  <script>
+    const socket = io();
+    let currentUser;
+    let currentReceiver;
+
+    function register() {
+      const username = document.getElementById('reg-username').value;
+      const password = document.getElementById('reg-password').value;
+      const file = document.getElementById('reg-profile-image').files[0];
+      const formData = new FormData();
+      formData.append('username', username);
+      formData.append('password', password);
+      if (file) formData.append('profileImage', file);
+
+      fetch('/register', { method: 'POST', body: formData })
+        .then(response => response.json())
+        .then(user => {
+          currentUser = user;
+          document.getElementById('user-name').innerText = user.username;
+          document.getElementById('profile-image').src = user.profileImage || 'default-profile.jpg';
+          document.getElementById('register').style.display = 'none';
+          document.getElementById('login').style.display = 'none';
+          document.getElementById('dashboard').style.display = 'block';
+          socket.emit('register-user', user.id);
+          loadUsers();
+          loadStatuses();
+        })
+        .catch(error => alert('Error: ' + error.message));
+    }
+
+    function login() {
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+      fetch('/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      })
+        .then(response => response.json())
+        .then(user => {
+          currentUser = user;
+          document.getElementById('user-name').innerText = user.username;
+          document.getElementById('profile-image').src = user.profileImage || 'default-profile.jpg';
+          document.getElementById('register').style.display = 'none';
+          document.getElementById('login').style.display = 'none';
+          document.getElementById('dashboard').style.display = 'block';
+          socket.emit('register-user', user.id);
+          loadUsers();
+          loadStatuses();
+        })
+        .catch(error => alert('Error: ' + error.message));
+    }
+
+    function loadUsers() {
+      fetch('/users')
+        .then(response => response.json())
+        .then(users => {
+          const usersDiv = document.getElementById('users');
+          usersDiv.innerHTML = '';
+          users
+            .filter(user => user.id !== currentUser.id)
+            .forEach(user => {
+              const userDiv = document.createElement('div');
+              userDiv.classList.add('p-4', 'border', 'rounded-md', 'cursor-pointer');
+              userDiv.innerHTML = ` 
+                <img src="${user.profileImage || 'default-profile.jpg'}" class="w-12 h-12 rounded-full" />
+                <p class="mt-2 text-center">${user.username}</p>
+              `;
+              userDiv.onclick = () => openChat(user);
+              usersDiv.appendChild(userDiv);
+            });
+        });
+    }
+
+    function openChat(user) {
+      currentReceiver = user;
+      document.getElementById('chat-box').style.display = 'flex';
+      document.getElementById('chat-profile-image').src = user.profileImage || 'default-profile.jpg';
+      document.getElementById('chat-username').innerText = user.username;
+      loadMessages();
+    }
+
+    function closeChatBox() {
+      document.getElementById('chat-box').style.display = 'none';
+    }
+
+    function loadMessages() {
+      fetch(`/messages/${currentUser.id}/${currentReceiver.id}`)
+        .then(response => response.json())
+        .then(messages => {
+          const messagesDiv = document.getElementById('chat-messages');
+          messagesDiv.innerHTML = '';
+          messages.forEach(message => {
+            const messageDiv = document.createElement('div');
+            messageDiv.classList.add('message');
+            messageDiv.classList.add(message.senderId === currentUser.id ? 'message-sender' : 'message-receiver');
+            messageDiv.innerHTML = `
+              ${message.text}
+              <span class="delete-button" onclick="deleteMessage(${message.id})">Delete</span>
+            `;
+            messagesDiv.appendChild(messageDiv);
+          });
+          messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        });
+    }
+
+    function sendMessage() {
+      const text = document.getElementById('chat-input').value;
+      if (!text || !currentReceiver) return;
+
+      const message = {
+        senderId: currentUser.id,
+        receiverId: currentReceiver.id,
+        text,
+        timestamp: new Date().toISOString(),
+      };
+
+      socket.emit('send-message', message);
+      document.getElementById('chat-input').value = '';
+      loadMessages();
+    }
+
+    function loadStatuses() {
+      fetch('/statuses')
+        .then(response => response.json())
+        .then(statuses => {
+          const statusesDiv = document.getElementById('statuses');
+          statusesDiv.innerHTML = '';
+          statuses.forEach(status => {
+            const statusDiv = document.createElement('div');
+            statusDiv.classList.add('carousel-item');
+            statusDiv.innerHTML = `
+              <img src="${status.statusImage || status.statusVideo || 'default-status.jpg'}" class="w-full h-40 object-cover rounded-lg" />
+              <p class="mt-2">${status.text}</p>
+            `;
+            statusesDiv.appendChild(statusDiv);
+          });
+        });
+    }
+
+    function postStatus() {
+      const text = document.getElementById('status-text').value;
+      const statusImage = document.getElementById('status-image').files[0];
+      const statusVideo = document.getElementById('status-video').files[0];
+
+      if (!text && !statusImage && !statusVideo) {
+        alert("Please provide some status content!");
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append('userId', currentUser.id);
+      formData.append('text', text);
+      if (statusImage) formData.append('statusImage', statusImage);
+      if (statusVideo) formData.append('statusVideo', statusVideo);
+
+      fetch('/status', { method: 'POST', body: formData })
+        .then(response => response.json())
+        .then(() => {
+          loadStatuses();
+          document.getElementById('status-success').style.display = 'block';
+          setTimeout(() => document.getElementById('status-success').style.display = 'none', 3000);
+        })
+        .catch(error => alert('Error: ' + error.message));
+    }
+
+    function deleteMessage(messageId) {
+      fetch(`/delete-message/${messageId}`, { method: 'DELETE' })
+        .then(response => response.json())
+        .then(data => {
+          if (data.message === 'Message deleted successfully') {
+            document.getElementById(`message-${messageId}`).remove();
+          }
+        })
+        .catch(error => alert('Error deleting message: ' + error.message));
+    }
+
+    socket.on('receive-message', (message) => {
+      if (currentReceiver && currentReceiver.id === message.senderId) {
+        loadMessages();
+      }
+    });
+
+    socket.on('user-list-updated', () => {
+      loadUsers();
+    });
+  </script>
+</body>
+</html>  -->
+
+
+<!-- 
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Real-time Status App</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <style>
+    .carousel {
+      display: flex;
+      overflow-x: auto;
+      scroll-snap-type: x mandatory;
+      gap: 1rem;
+      padding: 1rem 0;
+    }
+    .carousel-item {
+      scroll-snap-align: center;
+      flex-shrink: 0;
+      width: 300px;
+      background: #f3f4f6;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      padding: 1rem;
+      text-align: center;
+      height: 200px;
+    }
+    .chat-box {
+      display: none;
+      flex-direction: column;
+      height: 100%;
+      width: 100%;
+      background: white;
+      position: fixed;
+      bottom: 0;
+      right: 0;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      padding: 10px;
+      border-radius: 8px;
+    }
+    .chat-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px;
+      border-bottom: 1px solid #e4e6e7;
+    }
+    .chat-header img {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+    }
+    .chat-header h4 {
+      margin: 0 10px;
+      font-size: 16px;
+      font-weight: bold;
+    }
+    .message {
+      padding: 5px 10px;
+      margin-bottom: 5px;
+      border-radius: 12px;
+      width: fit-content;
+    }
+    .message-sender {
+      background-color: #0078D4;
+      color: white;
+      align-self: flex-end;
+    }
+    .message-receiver {
+      background-color: #E4E6E7;
+      color: black;
+      align-self: flex-start;
+    }
+    .delete-button {
+      font-size: 12px;
+      color: red;
+      cursor: pointer;
+    }
+    .active-status {
+      position: relative;
+    }
+    .active-status::after {
+      content: '';
+      position: absolute;
+      width: 10px;
+      height: 10px;
+      background-color: green;
+      border-radius: 50%;
+      bottom: 0;
+      right: 0;
+      border: 2px solid white;
+    }
+  </style>
+</head>
+<body class="bg-gray-100 font-sans">
+  <div class="container mx-auto p-4">
+    <div id="auth" class="max-w-md mx-auto bg-white shadow-lg rounded-lg p-6">
+      <div id="register" class="mb-6">
+        <h2 class="text-2xl font-bold text-gray-700 mb-4">Register</h2>
+        <input id="reg-username" placeholder="Username" class="w-full p-2 mb-3 border rounded-md" />
+        <input id="reg-password" type="password" placeholder="Password" class="w-full p-2 mb-3 border rounded-md" />
+        <input id="reg-profile-image" type="file" class="w-full p-2 mb-3 border rounded-md" />
+        <button onclick="register()" class="bg-blue-500 text-white py-2 px-4 rounded-md w-full hover:bg-blue-600">
+          Register
+        </button>
+      </div>
+
+      <div id="login">
+        <h2 class="text-2xl font-bold text-gray-700 mb-4">Login</h2>
+        <input id="username" placeholder="Username" class="w-full p-2 mb-3 border rounded-md" />
+        <input id="password" type="password" placeholder="Password" class="w-full p-2 mb-3 border rounded-md" />
+        <button onclick="login()" class="bg-green-500 text-white py-2 px-4 rounded-md w-full hover:bg-green-600">
+          Login
+        </button>
+      </div>
+    </div>
+
+    <div id="dashboard" class="hidden">
+      <div class="bg-white shadow-lg rounded-lg p-6 mb-6">
+        <h2 class="text-2xl font-bold text-gray-700">Welcome, <span id="user-name"></span></h2>
+        <img id="profile-image" class="w-16 h-16 rounded-full mt-4" alt="Profile Image" />
+      </div>
+
+      <div class="bg-white shadow-lg rounded-lg p-6 mb-6">
+        <h3 class="text-xl font-bold text-gray-700 mb-4">Post a Status</h3>
+        <input id="status-text" placeholder="What's on your mind?" class="w-full p-2 mb-3 border rounded-md" />
+        <input id="status-image" type="file" class="w-full p-2 mb-3 border rounded-md" />
+        <input id="status-video" type="file" accept="video/mp4, video/m4v, audio/mp3" class="w-full p-2 mb-3 border rounded-md" />
+        <button onclick="postStatus()" class="bg-blue-500 text-white py-2 px-4 rounded-md w-full hover:bg-blue-600" id="post-status-btn">
+          Post Status
+        </button>
+        <p id="status-success" class="text-green-500 mt-2 hidden">Status posted successfully!</p>
+      </div>
+
+      <div class="bg-white shadow-lg rounded-lg p-6 mb-6">
+        <h3 class="text-xl font-bold text-gray-700 mb-4">All Users</h3>
+        <div id="users" class="grid grid-cols-2 gap-4"></div>
+      </div>
+
+      <div class="bg-white shadow-lg rounded-lg p-6">
+        <h3 class="text-xl font-bold text-gray-700 mb-4">All Statuses</h3>
+        <div id="statuses" class="carousel"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="chat-box" class="chat-box">
+    <div class="chat-header">
+      <div class="flex items-center">
+        <img id="chat-profile-image" alt="User  Image" />
+        <h4 id="chat-username">User </h4>
+      </div>
+      <button onclick="closeChatBox()" class="text-gray-600 hover:text-gray-900">&times;</button>
+    </div>
+    <div id="chat-messages" class="flex-1 overflow-y-auto mb-3"></div>
+    <input id="chat-input" class="w-full p-2 border rounded-md" placeholder="Type a message..." />
+    <button onclick="sendMessage()" class="bg-blue-500 text-white py-2 px-4 rounded-md mt-2 w-full">Send</button>
+  </div>
+
+  <script>
+    const socket = io();
+    let currentUser ;
+    let currentReceiver;
+
+    function register() {
+      const username = document.getElementById('reg-username').value;
+      const password = document.getElementById('reg-password').value;
+      const file = document.getElementById('reg-profile-image').files[0];
+      const formData = new FormData();
+      formData.append('username', username);
+      formData.append('password', password);
+      if (file) formData.append('profileImage', file);
+
+      fetch('/register', { method: 'POST', body: formData })
+        .then(response => response.json())
+        .then(user => {
+          currentUser  = user;
+          document.getElementById('user-name').innerText = user.username;
+          document.getElementById('profile-image').src = user.profileImage || 'default-profile.jpg';
+          document.getElementById('register').style.display = 'none';
+          document.getElementById('login').style.display = 'none';
+          document.getElementById('dashboard').style.display = 'block';
+          socket.emit('register-user', user.id);
+          loadUsers();
+          loadStatuses();
+        })
+        .catch(error => alert('Error: ' + error.message));
+    }
+
+    function login() {
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+      fetch('/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      })
+        .then(response => response.json())
+        .then(user => {
+          currentUser  = user;
+          document.getElementById('user-name').innerText = user.username;
+          document.getElementById('profile-image').src = user.profileImage || 'default-profile.jpg';
+          document.getElementById('register').style.display = 'none';
+          document.getElementById('login').style.display = 'none';
+          document.getElementById('dashboard').style.display = 'block';
+          socket.emit('register-user', user.id);
+          loadUsers();
+          loadStatuses();
+        })
+        .catch(error => alert('Error: ' + error.message));
+    }
+
+    function loadUsers() {
+      fetch('/users')
+        .then(response => response.json())
+        .then(users => {
+          const usersDiv = document.getElementById('users');
+          usersDiv.innerHTML = '';
+          users
+            .filter(user => user.id !== currentUser .id)
+            .forEach(user => {
+              const userDiv = document.createElement('div');
+              userDiv.classList.add('p-4', 'border', 'rounded-md', 'cursor-pointer');
+              userDiv.innerHTML = ` 
+                <img src="${user.profileImage || 'default-profile.jpg'}" class="w-12 h-12 rounded-full" />
+                <p class="mt-2 text-center">${user.username}</p>
+              `;
+              userDiv.onclick = () => openChat(user);
+              usersDiv.appendChild(userDiv);
+            });
+        });
+    }
+
+    function openChat(user) {
+      currentReceiver = user;
+      document.getElementById('chat-box').style.display = 'flex';
+      document.getElementById('chat-profile-image').src = user.profileImage || 'default-profile.jpg';
+      document.getElementById('chat-username').innerText = user.username;
+      loadMessages();
+    }
+
+    function closeChatBox() {
+      document.getElementById('chat-box').style.display = 'none';
+    }
+
+    function loadMessages() {
+      fetch(`/messages/${currentUser .id}/${currentReceiver.id}`)
+        .then(response => response.json())
+        .then(messages => {
+          const messagesDiv = document.getElementById('chat-messages');
+          messagesDiv.innerHTML = '';
+          messages.forEach(message => {
+            const messageDiv = document.createElement('div');
+            messageDiv.classList.add('message');
+            messageDiv.classList.add(message.senderId === currentUser .id ? 'message-sender' : 'message-receiver');
+            messageDiv.innerHTML = `
+              ${message.text}
+              <span class="delete-button" onclick="deleteMessage(${message.id})">Delete</span>
+            `;
+            messagesDiv.appendChild(messageDiv);
+          });
+          messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        });
+    }
+
+    function sendMessage() {
+      const text = document.getElementById('chat-input').value;
+      if (!text || !currentReceiver) return;
+
+      const message = {
+        senderId: currentUser .id,
+        receiverId: currentReceiver.id,
+        text,
+        timestamp: new Date().toISOString(),
+      };
+
+      socket.emit('send-message', message);
+      document.getElementById('chat-input').value = '';
+      loadMessages();
+    }
+    function loadStatuses() {
+  fetch('/statuses')
+    .then(response => response.json())
+    .then(statuses => {
+      const statusesDiv = document.getElementById('statuses');
+      statusesDiv.innerHTML = '';
+
+      // Sort statuses by createdAt in descending order
+      statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+      statuses.forEach(status => {
+        const statusDiv = document.createElement('div');
+        statusDiv.classList.add('carousel-item');
+        statusDiv.innerHTML = `
+          <div class="flex items-center mb-2">
+            <div class="relative active-status">
+              <img src="${status.user?.profileImage || '/images/default-profile.jpg'}" class="w-10 h-10 rounded-full" />
+            </div>
+            <p class="ml-2 font-bold">${status.user?.username || 'Unknown User'}</p>
+          </div>
+          ${status.statusImage ? `<img src="${status.statusImage}" class="w-full h-40 object-cover rounded-lg" />` : ''}
+          ${status.statusVideo ? `<video controls class="w-full h-40 object-cover rounded-lg"><source src="${status.statusVideo}" type="video/mp4"></video>` : ''}
+          <p class="mt-2">${status.text}</p>
+        `;
+        statusesDiv.appendChild(statusDiv);
+      });
+    })
+    .catch(error => console.error('Error loading statuses:', error));
+    console.log('User  found:', user);
+}
+  function postStatus() {
+      const text = document.getElementById('status-text').value;
+      const statusImage = document.getElementById('status-image').files[0];
+      const statusVideo = document.getElementById('status-video').files[0];
+
+      if (!text && !statusImage && !statusVideo) {
+        alert("Please provide some status content!");
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append('userId', currentUser .id);
+      formData.append('text', text);
+      if (statusImage) formData.append('statusImage', statusImage);
+      if (statusVideo) formData.append('statusVideo', statusVideo);
+
+      fetch('/status', { method: 'POST', body: formData })
+        .then(response => response.json())
+        .then(() => {
+          loadStatuses();
+          document.getElementById('status-success').style.display = 'block';
+          setTimeout(() => document.getElementById('status-success').style.display = 'none', 3000);
+        })
+        .catch(error => alert('Error: ' + error.message));
+    }
+
+    function deleteMessage(messageId) {
+      fetch(`/delete-message/${messageId}`, { method: 'DELETE' })
+        .then(response => response.json())
+        .then(data => {
+          if (data.message === 'Message deleted successfully') {
+            loadMessages();
+          }
+        })
+        .catch(error => alert('Error deleting message: ' + error.message));
+    }
+
+    socket.on('receive-message', (message) => {
+      if (currentReceiver && currentReceiver.id === message.senderId) {
+        loadMessages();
+      }
+    });
+
+    socket.on('user-list-updated', () => {
+      loadUsers();
+    });
+  </script>
+</body>
+</html> -->
+<!-- 
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Real-time Status App</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <style>
+    .carousel {
+      display: flex;
+      overflow-x: auto;
+      scroll-snap-type: x mandatory;
+      gap: 1rem;
+      padding: 1rem 0;
+    }
+    .carousel-item {
+      scroll-snap-align: center;
+      flex-shrink: 0;
+      width: 300px;
+      background: #f3f4f6;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      padding: 1rem;
+      text-align: center;
+      height: 200px;
+      transition: transform 0.3s ease; /* Smooth transition for zoom */
+    }
+    .carousel-item.zoom {
+      transform: scale(1.1); /* Zoom effect */
+      z-index: 10; /* Bring to front */
+    }
+    .chat-box {
+      display: none;
+      flex-direction: column;
+      height: 100%;
+      width: 100%;
+      background: white;
+      position: fixed;
+      bottom: 0;
+      right: 0;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      padding: 10px;
+      border-radius: 8px;
+    }
+    .chat-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px;
+      border-bottom: 1px solid #e4e6e7;
+    }
+    .chat-header img {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+    }
+    .chat-header h4 {
+      margin: 0 10px;
+      font-size: 16px;
+      font-weight: bold;
+    }
+    .message {
+      padding: 5px 10px;
+      margin-bottom: 5px;
+      border-radius: 12px;
+      width: fit-content;
+    }
+    .message-sender {
+      background-color: #0078D4;
+      color: white;
+      align-self: flex-end;
+    }
+    .message-receiver {
+      background-color: #E4E6E7;
+      color: black;
+      align-self: flex-start;
+    }
+    .delete-button {
+      font-size: 12px;
+      color: red;
+      cursor: pointer;
+    }
+    .active-status {
+      position: relative;
+    }
+    .active-status::after {
+      content: '';
+      position: absolute;
+      width: 10px;
+      height: 10px;
+      background-color: green;
+      border-radius: 50%;
+      bottom: 0;
+      right: 0;
+      border: 2px solid white;
+    }
+    .offline-status {
+      color: gray;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body class="bg-gray-100 font-sans">
+  <div class="container mx-auto p-4">
+    <div id="auth" class="max-w-md mx-auto bg-white shadow-lg rounded-lg p-6">
+      <div id="register" class="mb-6">
+        <h2 class="text-2xl font-bold text-gray-700 mb-4">Register</h2>
+        <input id="reg-username" placeholder="Username" class="w-full p-2 mb-3 border rounded-md" />
+        <input id="reg-password" type="password" placeholder="Password" class="w-full p-2 mb-3 border rounded-md" />
+        <input id="reg-profile-image" type="file" class="w-full p-2 mb-3 border rounded-md" />
+        <button onclick="register()" class="bg-blue-500 text-white py-2 px-4 rounded-md w-full hover:bg-blue-600">
+          Register
+        </button>
+      </div>
+
+      <div id="login">
+        <h2 class="text-2xl font-bold text-gray-700 mb-4">Login</h2>
+        <input id="username" placeholder="Username" class="w-full p-2 mb-3 border rounded-md" />
+        <input id="password" type="password" placeholder="Password" class="w-full p-2 mb-3 border rounded-md" />
+        <button onclick="login()" class="bg-green-500 text-white py-2 px-4 rounded-md w-full hover:bg-green-600">
+          Login
+        </button>
+      </div>
+    </div>
+
+    <div id="dashboard" class="hidden">
+      <div class="bg-white shadow-lg rounded-lg p-6 mb-6">
+        <h2 class="text-2xl font-bold text-gray-700">Welcome, <span id="user-name"></span></h2>
+        <img id="profile-image" class="w-16 h-16 rounded-full mt-4" alt="Profile Image" />
+      </div>
+
+      <div class="bg-white shadow-lg rounded-lg p-6 mb-6">
+        <h3 class="text-xl font-bold text-gray-700 mb-4">Post a Status</h3>
+        <input id="status-text" placeholder="What's on your mind?" class="w-full p-2 mb-3 border rounded-md" />
+        <input id="status-image" type="file" class="w-full p-2 mb-3 border rounded-md" />
+        <input id="status-video" type="file" accept="video/mp4, video/m4v, audio/mp3" class="w-full p-2 mb-3 border rounded-md" />
+        <button onclick="postStatus()" class="bg-blue-500 text-white py-2 px-4 rounded-md w-full hover:bg-blue-600" id="post-status-btn">
+          Post Status
+        </button>
+        <p id="status-success" class="text-green-500 mt-2 hidden">Status posted successfully!</p>
+      </div>
+
+      <div class="bg-white shadow-lg rounded-lg p-6 mb-6">
+        <h3 class="text-xl font-bold text-gray-700 mb-4">All Users</h3>
+        <div id="users" class="grid grid-cols-2 gap-4"></div>
+      </div>
+
+      <div class="bg-white shadow-lg rounded-lg p-6">
+        <h3 class="text-xl font-bold text-gray-700 mb-4">All Statuses</h3>
+        <div id="statuses" class="carousel"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="chat-box" class="chat-box">
+    <div class="chat-header">
+      <div class="flex items-center">
+        <img id="chat-profile-image" alt="User   Image" />
+        <h4 id="chat-username">User  </h4>
+      </div>
+      <button onclick="closeChatBox()" class="text-gray-600 hover:text-gray-900">&times;</button>
+    </div>
+    <div id="chat-messages" class="flex-1 overflow-y-auto mb-3"></div>
+    <input id="chat-input" class="w-full p-2 border rounded-md" placeholder="Type a message..." />
+    <button onclick="sendMessage()" class="bg-blue-500 text-white py-2 px-4 rounded-md mt-2 w-full">Send</button>
+  </div>
+
+  <script>
+    const socket = io();
+    let currentUser ;
+    let currentReceiver;
+
+    function register() {
+      const username = document.getElementById('reg-username').value;
+      const password = document.getElementById('reg-password').value;
+      const file = document.getElementById('reg-profile-image').files[0];
+      const formData = new FormData();
+      formData.append('username', username);
+      formData.append('password', password);
+      if (file) formData.append('profileImage', file);
+
+      fetch('/register', { method: 'POST', body: formData })
+        .then(response => response.json())
+        .then(user => {
+          currentUser  = user;
+          document.getElementById('user-name').innerText = user.username;
+          document.getElementById('profile-image').src = user.profileImage || '/images/default-profile.jpg';
+          document.getElementById('register').style.display = 'none';
+          document.getElementById('login').style.display = 'none';
+          document.getElementById('dashboard').style.display = 'block';
+          socket.emit('register-user', user.id);
+          loadUsers();
+          loadStatuses();
+        })
+        .catch(error => alert('Error: ' + error.message));
+    }
+
+    function login() {
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+      fetch('/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      })
+        .then(response => response.json())
+        .then(user => {
+          currentUser  = user;
+          document.getElementById('user-name').innerText = user.username;
+          document.getElementById('profile-image').src = user.profileImage || '/images/default-profile.jpg';
+          document.getElementById('register').style.display = 'none';
+          document.getElementById('login').style.display = 'none';
+          document.getElementById('dashboard').style.display = 'block';
+          socket.emit('register-user', user.id);
+          loadUsers();
+          loadStatuses();
+        })
+        .catch(error => alert('Error: ' + error.message));
+    }
+
+    function loadUsers() {
+      fetch('/users')
+        .then(response => response.json())
+        .then(users => {
+          const usersDiv = document.getElementById('users');
+          usersDiv.innerHTML = '';
+          users.forEach(user => {
+            if (user.id !== currentUser .id) { // Exclude current user
+              const userDiv = document.createElement('div');
+              userDiv.classList.add('p-4', 'border', 'rounded-md', 'cursor-pointer');
+              userDiv.innerHTML = ` 
+                <img src="${user.profileImage || '/images/default-profile.jpg'}" class="w-12 h-12 rounded-full" />
+                <p class="mt-2 text-center">${user.username}</p>
+                <p class="offline-status">${user.isOnline ? 'Online' : 'Last seen: ' + new Date(user.lastSeen).toLocaleTimeString()}</p>
+              `;
+              userDiv.onclick = () => openChat(user);
+              usersDiv.appendChild(userDiv);
+            }
+          });
+        });
+    }
+
+    function openChat(user) {
+      currentReceiver = user;
+      document.getElementById('chat-box').style.display = 'flex';
+      document.getElementById('chat-profile-image').src = user.profileImage || '/images/default-profile.jpg';
+      document.getElementById('chat-username').innerText = user.username;
+      loadMessages();
+    }
+
+    function closeChatBox() {
+      document.getElementById('chat-box').style.display = 'none';
+    }
+
+    function loadMessages() {
+      fetch(`/messages/${currentUser .id}/${currentReceiver.id}`)
+        .then(response => response .json())
+        .then(messages => {
+          const messagesDiv = document.getElementById('chat-messages');
+          messagesDiv.innerHTML = '';
+          messages.forEach(message => {
+            const messageDiv = document.createElement('div');
+            messageDiv.classList.add('message');
+            messageDiv.classList.add(message.senderId === currentUser  .id ? 'message-sender' : 'message-receiver');
+            messageDiv.innerHTML = `
+              ${message.text}
+              <span class="delete-button" onclick="deleteMessage(${message.id})">Delete</span>
+            `;
+            messagesDiv.appendChild(messageDiv);
+          });
+          messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        });
+    }
+
+    function sendMessage() {
+      const text = document.getElementById('chat-input').value;
+      if (!text || !currentReceiver) return;
+
+      const message = {
+        senderId: currentUser  .id,
+        receiverId: currentReceiver.id,
+        text,
+        timestamp: new Date().toISOString(),
+      };
+
+      socket.emit('send-message', message);
+      document.getElementById('chat-input').value = '';
+      loadMessages();
+    }
+
+    function loadStatuses() {
+      fetch('/statuses')
+        .then(response => response.json())
+        .then(statuses => {
+          const statusesDiv = document.getElementById('statuses');
+          statusesDiv.innerHTML = '';
+
+          // Sort statuses by createdAt in descending order
+          statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+          statuses.forEach(status => {
+            const statusDiv = document.createElement('div');
+            statusDiv.classList.add('carousel-item');
+            statusDiv.innerHTML = `
+              <div class="flex items-center mb-2">
+                <div class="relative active-status">
+                  <img src="${status.user?.profileImage || '/images/default-profile.jpg'}" class="w-10 h-10 rounded-full" />
+                </div>
+                <p class="ml-2 font-bold">${status.user?.username || 'Unknown User'}</p>
+              </div>
+              ${status.statusImage ? `<img src="${status.statusImage}" class="w-full h-40 object-cover rounded-lg" />` : ''}
+              ${status.statusVideo ? `<video class="status-video w-full h-40 object-cover rounded-lg" onclick="toggleVideo(this)"><source src="${status.statusVideo}" type="video/mp4"></video>` : ''}
+              <p class="mt-2">${status.text}</p>
+            `;
+            statusesDiv.appendChild(statusDiv);
+          });
+        })
+        .catch(error => console.error('Error loading statuses:', error));
+    }
+
+    function toggleVideo(videoElement) {
+      if (videoElement.paused) {
+        videoElement.play();
+        videoElement.classList.add('zoom'); // Add zoom class
+      } else {
+        videoElement.pause();
+        videoElement.classList.remove('zoom'); // Remove zoom class
+      }
+    }
+
+    function postStatus() {
+      const text = document.getElementById('status-text').value;
+      const statusImage = document.getElementById('status-image').files[0];
+      const statusVideo = document.getElementById('status-video').files[0];
+
+      if (!text && !statusImage && !statusVideo) {
+        alert("Please provide some status content!");
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append('userId', currentUser  .id);
+      formData.append('text', text);
+      if (statusImage) formData.append('statusImage', statusImage);
+      if (statusVideo) formData.append('statusVideo', statusVideo);
+
+      fetch('/status', { method: 'POST', body: formData })
+        .then(response => response.json())
+        .then(status => {
+          loadStatuses();
+          document.getElementById('status-success').style.display = 'block';
+          setTimeout(() => document.getElementById('status-success').style.display = 'none', 3000);
+          socket.emit('new-status', status); 
+        })
+        .catch(error => alert('Error: ' + error.message));
+    }
+
+    socket.on('new-status', (status) => {
+      loadStatuses();
+    });
+
+    socket.on('receive-message', (message) => {
+      if (message.receiverId === currentUser  .id) {
+        loadMessages();
+      }
+    });
+
+    socket.on('update-users', (users) => {
+      const usersDiv = document.getElementById('users');
+      usersDiv.innerHTML = '';
+      users.forEach(user => {
+        const userDiv = document.createElement('div');
+        userDiv.classList.add('p-4', 'border', 'rounded-md', 'cursor-pointer');
+        userDiv.innerHTML = ` 
+          <img src="${user.profileImage || '/images/default-profile.jpg'}" class="w-12 h-12 rounded-full" />
+          <p class="mt-2 text-center">${user.username}</p>
+          <p class="offline-status">${user.isOnline ? 'Online' : 'Last seen: ' + new Date(user.lastSeen).toLocaleTimeString()}</p>
+        `;
+        userDiv.onclick = () => openChat(user);
+        usersDiv.appendChild(userDiv);
+      });
+    });
+  </script>
+</body>
+</html> -->
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Real-time Status App</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <style>
+    .carousel {
+      display: flex;
+      overflow-x: auto;
+      scroll-snap-type: x mandatory;
+      gap: 1rem;
+      padding: 1rem 0;
+    }
+    .carousel-item {
+      scroll-snap-align: center;
+      flex-shrink: 0;
+      width: 300px;
+      background: #f3f4f6;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      padding: 1rem;
+      text-align: center;
+      height: 200px;
+      transition: transform 0.3s ease; /* Smooth transition for zoom */
+    }
+    .carousel-item.zoom {
+      transform: scale(1.1); /* Zoom effect */
+      z-index: 10; /* Bring to front */
+    }
+    .chat-box {
+      display: none;
+      flex-direction: column;
+      height: 100%;
+      width: 100%;
+      background: white;
+      position: fixed;
+      bottom: 0;
+      right: 0;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      padding: 10px;
+      border-radius: 8px;
+    }
+    .chat-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px;
+      border-bottom: 1px solid #e4e6e7;
+    }
+    .chat-header img {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+    }
+    .chat-header h4 {
+      margin: 0 10px;
+      font-size: 16px;
+      font-weight: bold;
+    }
+    .message {
+      padding: 5px 10px;
+      margin-bottom: 5px;
+      border-radius: 12px;
+      width: fit-content;
+    }
+    .message-sender {
+      background-color: #0078D4;
+      color: white;
+      align-self: flex-end;
+    }
+    .message-receiver {
+      background-color: #E4E6E7;
+      color: black;
+      align-self: flex-start;
+    }
+    .delete-button {
+      font-size: 12px;
+      color: red;
+      cursor: pointer;
+    }
+    .active-status {
+      position: relative;
+    }
+    .active-status::after {
+      content: '';
+      position: absolute;
+      width: 10px;
+      height: 10px;
+      background-color: green;
+      border-radius: 50%;
+      bottom: 0;
+      right: 0;
+      border: 2px solid white;
+    }
+    .offline-status {
+      color: gray;
+      font-size: 12px;
+    }
+    .last-seen {
+      color: green; /* Green color for last seen */
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body class="bg-gray-100 font-sans">
+  <div class="container mx-auto p-4">
+    <div id="auth" class="max-w-md mx-auto bg-white shadow-lg rounded-lg p-6">
+      <div id="register" class="mb-6">
+        <h2 class="text-2xl font-bold text-gray-700 mb-4">Register</h2>
+        <input id="reg-username" placeholder="Username" class="w-full p-2 mb-3 border rounded-md" />
+        <input id="reg-password" type="password" placeholder="Password" class="w-full p-2 mb-3 border rounded-md" />
+        <input id="reg-profile-image" type="file" class="w-full p-2 mb-3 border rounded-md" />
+        <button onclick="register()" class="bg-blue-500 text-white py-2 px-4 rounded-md w-full hover:bg-blue-600">
+          Register
+        </button>
+      </div>
+
+      <div id="login">
+        <h2 class="text-2xl font-bold text-gray-700 mb-4">Login</h2>
+        <input id="username" placeholder="Username" class="w-full p-2 mb-3 border rounded-md" />
+        <input id="password" type="password" placeholder="Password" class="w-full p-2 mb-3 border rounded-md" />
+        <button onclick="login()" class="bg-green-500 text-white py-2 px-4 rounded-md w-full hover:bg-green-600">
+          Login
+        </button>
+      </div>
+    </div>
+
+    <div id="dashboard" class="hidden">
+      <div class="bg-white shadow-lg rounded-lg p-6 mb-6">
+        <h2 class="text-2xl font-bold text-gray-700">Welcome, <span id="user-name"></span></h2>
+        <img id="profile-image" class="w-16 h-16 rounded-full mt-4" alt="Profile Image" />
+      </div>
+
+      <div class="bg-white shadow-lg rounded-lg p-6 mb-6">
+        <h3 class="text-xl font-bold text-gray-700 mb-4">Post a Status</h3>
+        <input id="status-text" placeholder="What's on your mind?" class="w-full p-2 mb-3 border rounded-md" />
+        <input id="status-image" type="file" class="w-full p-2 mb-3 border rounded-md" />
+        <input id="status-video" type="file" accept="video/mp4, video/m4v, audio/mp3" class="w-full p-2 mb-3 border rounded-md" />
+        <button onclick="postStatus()" class="bg-blue-500 text-white py-2 px-4 rounded-md w-full hover:bg-blue-600" id="post-status-btn">
+          Post Status
+        </button>
+        <p id="status-success" class="text-green-500 mt-2 hidden">Status posted successfully!</p>
+      </div>
+
+      <div class="bg-white shadow-lg rounded-lg p-6 mb-6">
+        <h3 class="text-xl font-bold text-gray-700 mb-4">All Users</h3>
+        <div id="users" class="grid grid-cols-2 gap-4"></div>
+      </div>
+
+      <div class="bg-white shadow-lg rounded-lg p-6">
+        <h3 class="text-xl font-bold text-gray-700 mb-4">All Statuses</h3>
+        <div id="statuses" class="carousel"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="chat-box" class="chat-box">
+    <div class="chat-header">
+      <div class="flex items-center">
+        <img id="chat-profile-image" alt="User  Image" />
+        <h4 id="chat-username">User </h4>
+        <span id="chat-status" class="ml-2 offline-status"></span>
+      </div>
+      <button onclick="closeChatBox()" class="text-gray-600 hover:text-gray-900">&times;</button>
+    </div>
+    <div id="chat-messages" class="flex-1 overflow-y-auto mb-3"></div>
+    <input id="chat-input" class="w-full p-2 border rounded-md" placeholder="Type a message..." />
+    <button onclick="sendMessage()" class="bg-blue-500 text-white py-2 px-4 rounded-md mt-2 w-full">Send</button>
+  </div>
+
+  <script>
+    const socket = io();
+    let currentUser ;
+    let currentReceiver;
+
+    function register() {
+      const username = document.getElementById('reg-username').value;
+      const password = document.getElementById('reg-password').value;
+      const file = document.getElementById('reg-profile-image').files[0];
+      const formData = new FormData();
+      formData.append('username', username);
+      formData.append('password', password);
+      if (file) formData.append('profileImage', file);
+
+      fetch('/register', { method: 'POST', body: formData })
+        .then(response => response.json())
+        .then(user => {
+          currentUser  = user;
+          document.getElementById('user-name').innerText = user.username;
+          document.getElementById('profile-image').src = user.profileImage || '/images/default-profile.jpg';
+          document.getElementById('register').style.display = 'none';
+          document.getElementById('login').style.display = 'none';
+          document.getElementById('dashboard').style.display = 'block';
+          socket.emit('register-user', user.id);
+          loadUsers();
+          loadStatuses();
+        })
+        .catch(error => alert('Error: ' + error.message));
+    }
+
+    function login() {
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+      fetch('/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      })
+        .then(response => response.json())
+        .then(user => {
+          currentUser  = user;
+          document.getElementById('user-name').innerText = user.username;
+          document.getElementById('profile-image').src = user.profileImage || '/images/default-profile.jpg';
+          document.getElementById('register').style.display = 'none';
+          document.getElementById('login').style.display = 'none';
+          document.getElementById('dashboard').style.display = 'block';
+          socket.emit('register-user', user.id);
+          loadUsers();
+          loadStatuses();
+        })
+        .catch(error => alert('Error: ' + error.message));
+    }
+
+    function loadUsers() {
+      fetch('/users')
+        .then(response => response.json())
+        .then(users => {
+          const usersDiv = document.getElementById('users');
+          usersDiv.innerHTML = '';
+          users.forEach(user => {
+            if (user.id !== currentUser .id) { // Exclude current user
+              const userDiv = document.createElement('div');
+              userDiv.classList.add('p-4', 'border', 'rounded-md', 'cursor-pointer');
+              userDiv.innerHTML = ` 
+                <img src="${user.profileImage || '/images/default-profile.jpg'}" class="w-12 h-12 rounded-full" />
+                <p class="mt-2 text-center">${user.username}</p>
+                <p class="offline-status">${user.isOnline ? 'Online' : 'Last seen: ' + new Date(user.lastSeen).toLocaleTimeString()}</p>
+              `;
+              userDiv.onclick = () => openChat(user);
+              usersDiv.appendChild(userDiv);
+            }
+          });
+        });
+    }
+
+    function openChat(user) {
+      currentReceiver = user;
+      document.getElementById('chat-box').style.display = 'flex';
+      document.getElementById('chat-profile-image').src = user.profileImage || '/images/default-profile.jpg';
+      document.getElementById('chat-username').innerText = user.username;
+      document.getElementById('chat-status').innerText = user.isOnline ? 'Online' : 'Last seen: ' + new Date(user.lastSeen).toLocaleString();
+      loadMessages();
+    }
+
+    function closeChatBox() {
+      document.getElementById('chat-box').style.display = 'none';
+    }
+
+    function loadMessages() {
+      fetch(`/messages/${currentUser .id}/${currentReceiver.id}`)
+        .then(response => response.json())
+        .then(messages => {
+          const messagesDiv = document.getElementById('chat-messages');
+          messagesDiv.innerHTML = '';
+          messages.forEach(message => {
+            const messageDiv = document.createElement('div');
+            messageDiv.classList.add('message');
+            messageDiv.classList.add(message.senderId === currentUser .id ? 'message-sender' : 'message-receiver');
+            messageDiv.innerHTML = `
+              ${message.text}
+              <span class="delete-button" onclick="deleteMessage(${message.id})">Delete</span>
+            `;
+            messagesDiv.appendChild(messageDiv);
+          });
+          messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        });
+    }
+
+    function sendMessage() {
+      const text = document.getElementById('chat-input').value;
+      if (!text || !currentReceiver) return;
+
+      const message = {
+        senderId: currentUser .id,
+        receiverId: currentReceiver.id,
+        text,
+        timestamp: new Date().toISOString(),
+      };
+
+      socket.emit('send-message', message);
+      document.getElementById('chat-input').value = '';
+      loadMessages();
+    }
+
+    function loadStatuses() {
+      fetch('/statuses')
+        .then(response => response.json())
+        .then(statuses => {
+          const statusesDiv = document.getElementById('statuses');
+          statusesDiv.innerHTML = '';
+
+          // Sort statuses by createdAt in descending order
+          statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+          statuses.forEach(status => {
+            const statusDiv = document.createElement('div');
+            statusDiv.classList.add('carousel-item');
+            statusDiv.innerHTML = `
+              <div class="flex items-center mb-2">
+                <div class="relative active-status">
+                  <img src="${status.user?.profileImage || '/images/default-profile.jpg'}" class="w-10 h-10 rounded-full" />
+                </div>
+                <p class="ml-2 font-bold">${status.user?.username || 'Unknown User'}</p>
+              </div>
+              ${status.statusImage ? `<img src="${status.statusImage}" class="w-full h-40 object-cover rounded-lg" />` : ''}
+              ${status.statusVideo ? `<video class="status-video w-full h-40 object-cover rounded-lg" onclick="toggleVideo(this)"><source src="${status.statusVideo}" type="video/mp4"></video>` : ''}
+              <p class="mt-2">${status.text}</p>
+            `;
+            statusesDiv.appendChild(statusDiv);
+          });
+        })
+        .catch(error => console.error('Error loading statuses:', error));
+    }
+
+    function toggleVideo(videoElement) {
+      if (videoElement.paused) {
+        videoElement.play();
+        videoElement.classList.add('zoom'); // Add zoom class
+      } else {
+        videoElement.pause();
+        videoElement.classList.remove('zoom'); // Remove zoom class
+      }
+    }
+
+    function postStatus() {
+      const text = document.getElementById('status-text').value;
+      const statusImage = document.getElementById('status-image').files[0];
+      const statusVideo = document.getElementById('status-video').files[0];
+
+      if (!text && !statusImage && !statusVideo) {
+        alert("Please provide some status content!");
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append('userId', currentUser .id);
+      formData.append('text', text);
+      if (statusImage) formData.append('statusImage', statusImage);
+      if (statusVideo) formData.append('statusVideo', statusVideo);
+
+      fetch('/status', { method: 'POST', body: formData })
+        .then(response => response.json())
+        .then(status => {
+          loadStatuses();
+          document.getElementById('status-success').style.display = 'block';
+          setTimeout(() => document.getElementById('status-success').style.display = 'none', 3000);
+          socket.emit('new-status', status); // Emit the new status to other users
+        })
+        .catch(error => alert('Error: ' + error.message));
+    }
+
+    socket.on('new-status', (status) => {
+      loadStatuses();
+    });
+
+    socket.on('receive-message', (message) => {
+      if (message.receiverId === currentUser .id) {
+        loadMessages();
+      }
+    });
+
+    // Handle user online/offline status
+    socket.on('update-users', (users) => {
+      const usersDiv = document.getElementById('users');
+      usersDiv.innerHTML = '';
+      users.forEach(user => {
+        if (user.id !== currentUser .id) { // Exclude current user
+          const userDiv = document.createElement('div');
+          userDiv.classList.add('p-4', 'border', 'rounded-md', 'cursor-pointer');
+          userDiv.innerHTML = ` 
+            <img src="${user.profileImage || '/images/default-profile.jpg'}" class="w-12 h-12 rounded-full" />
+            <p class="mt-2 text-center">${user.username}</p>
+            <p class="offline-status">${user.isOnline ? 'Online' : 'Last seen: ' + new Date(user.lastSeen).toLocaleTimeString()}</p>
+          `;
+          userDiv.onclick = () => openChat(user);
+          usersDiv.appendChild(userDiv);
+        }
+      });
+    });
+  </script>
+</body>
+</html>
